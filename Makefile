@@ -20,8 +20,6 @@ eunit:
 
 docs:
 	./rebar skip_deps=true doc
-	@cp -R apps/epgsql/doc doc/epgsql
-	@cp -R apps/epgsql_pool/doc doc/epgsql_pool
 
 dialyzer: compile
-	@dialyzer -Wno_return -c apps/epgsql_pool/ebin
+	@dialyzer -Wno_return -c ebin

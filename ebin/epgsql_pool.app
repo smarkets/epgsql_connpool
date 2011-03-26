@@ -3,10 +3,15 @@
 {application, epgsql_pool,
  [{description, "PostgreSQL Client Pool"},
   {vsn, "1.0.0"},
-  {modules, [epgsql_pool, epgsql_pool_app, epgsql_pool_sup]},
+  {modules,
+   [
+    epgsql_pool_config,
+    epgsql_pool,
+    epgsql_pool_app,
+    epgsql_pool_conn,
+    epgsql_pool_conn_sup,
+    epgsql_pool_sup
+   ]},
   {registered, []},
-  {applications, [kernel, stdlib, sasl, public_key, crypto, ssl]},
-  {mod, {epgsql_pool_app, []}},
-  {env, [{pool_size, 10}]}]}.
-
-
+  {applications, [epgsql]},
+  {mod, {epgsql_pool_app, []}}]}.
