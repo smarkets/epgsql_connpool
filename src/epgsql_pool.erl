@@ -43,6 +43,8 @@ transaction(Name, F, Args) ->
         exit:Exit ->
             {ok, [], []} = pgsql:squery(CPid, "ROLLBACK"),
             exit(Exit)
+    after
+        ok = epgsql_pool_conn:return(Pid)
     end.
 
 name(Name) when is_atom(Name) ->
@@ -75,7 +77,7 @@ handle_call(Msg, _, _) -> exit({unknown_call, Msg}).
 handle_cast(
   {available, Pid},
   #state{conns = C, requests = R, busy = B0} = State) ->
-    F = fun({_, Ts}) ->
+    F = fun({_, _, Ts}) ->
                 timer:now_diff(erlang:now(), Ts) > ?MAX_WAIT
         end,
     B = case lists:keysearch(Pid, 2, B0) of
@@ -99,10 +101,13 @@ handle_info(
   #state{requests = R, busy = B} = State) ->
     case lists:keysearch(Ref, 2, queue:to_list(R)) of
         false ->
-            {value, {Ref, Conn}} = lists:keysearch(Ref, 1, B),
-            B1 = lists:keydelete(Ref, 1, B),
-            true = exit(Conn, rollback),
-            {noreply, State#state{busy = B1}};
+            case lists:keysearch(Ref, 1, B) of
+                {value, {Ref, Conn}} ->
+                    B1 = lists:keydelete(Ref, 1, B),
+                    {noreply, State#state{busy = B1}};
+                false ->
+                    {noreply, State}
+            end;
         {value, {_, Ref, _}} ->
             R1 = queue:from_list(lists:keydelete(Ref, 2, queue:to_list(R))),
             {noreply, State#state{requests = R1}}
