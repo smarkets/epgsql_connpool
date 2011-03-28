@@ -4,15 +4,16 @@
 
 -behaviour(gen_server).
 
--export([connection/1, return/1]).
+-export([connection/1, release/1, close/1]).
 -export([start_link/1, init/1, code_change/3, terminate/2,
          handle_call/3, handle_cast/2, handle_info/2]).
 
--record(state, {pool, pid, available = true}).
+-record(state, {pool, pid}).
 
 connection(Name) -> gen_server:call(Name, connection, infinity).
-return(Name) -> gen_server:call(Name, return, infinity).
+release(Name) -> gen_server:call(Name, release, infinity).
 start_link(Name) -> gen_server:start_link(?MODULE, Name, []).
+close(Name) -> gen_server:call(Name, close, infinity).
 
 init(Name) ->
     case epgsql_pool_config:conn_by_name(Name) of
@@ -24,13 +25,15 @@ init(Name) ->
             {ok, #state{pool = Name, pid = Pid}}
     end.
 
-terminate(shutdown, _) -> ok.
+terminate(shutdown, #state{pid = P}) -> pgsql:close(P).
 
+handle_call(close, _From, State) ->
+    {stop, shutdown, State};
 handle_call(connection, _From, #state{pid = P} = State) ->
-    {reply, {ok, P}, State#state{available = false}};
-handle_call(return, _From, #state{available = false, pool = Name} = State) ->
+    {reply, {ok, P}, State};
+handle_call(release, _From, #state{pool = Name} = State) ->
     ok = epgsql_pool:available(Name, self()),
-    {reply, ok, State#state{available = true}};
+    {reply, ok, State};
 handle_call(Msg, _, _) -> exit({unknown_call, Msg}).
 
 handle_cast(Msg, _) -> exit({unknown_cast, Msg}).
