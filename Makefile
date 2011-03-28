@@ -22,4 +22,4 @@ docs:
 	./rebar skip_deps=true doc
 
 dialyzer: compile
-	@dialyzer -Wno_return -c ebin
+	@dialyzer -Wno_return -c ebin deps/epgsql/ebin
