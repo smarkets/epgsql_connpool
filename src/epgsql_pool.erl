@@ -102,7 +102,7 @@ handle_info(
     case lists:keysearch(Ref, 2, queue:to_list(R)) of
         false ->
             case lists:keysearch(Ref, 1, B) of
-                {value, {Ref, Conn}} ->
+                {value, {Ref, _Conn}} ->
                     B1 = lists:keydelete(Ref, 1, B),
                     {noreply, State#state{busy = B1}};
                 false ->
