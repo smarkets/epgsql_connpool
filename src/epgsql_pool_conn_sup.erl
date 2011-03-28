@@ -19,4 +19,4 @@ init([Name]) ->
     {ok, {{simple_one_for_one, 10, 10},
           [{undefined,
             {epgsql_pool_conn, start_link, [Name]},
-            temporary, brutal_kill, worker, [epgsql_pool_conn]}]}}.
+            transient, brutal_kill, worker, [epgsql_pool_conn]}]}}.
