@@ -17,4 +17,4 @@ init([Name]) ->
             16#ffffffff, supervisor, [epgsql_pool_conn_sup]},
            {epgsql_pool, {epgsql_pool, start_link, [Name]}, permanent,
             16#ffffffff, worker, [epgsql_pool]}],
-    {ok, {{one_for_one, 10, 10}, Children}}.
+    {ok, {{one_for_all, 10, 10}, Children}}.
