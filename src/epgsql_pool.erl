@@ -16,6 +16,7 @@
           name,
           min_size,
           max_size = 0,
+          busy     = 0, % count of busy connections
           requests = queue:new(),
           conns    = queue:new(),
           tab      = gb_trees:empty()
@@ -72,7 +73,10 @@ start_link(Name) ->
 
 init(Name) ->
     case epgsql_pool_config:pool_size(Name) of
-        {ok, Size}         -> {ok, new_connection(#state{min_size = Size, name = Name})};
+        {ok, Size} ->
+            S = #state{min_size = Size, name = Name},
+            ok = ensure_min(S),
+            {ok, S};
         {error, not_found} -> {stop, {error, missing_configuration}}
     end.
 
@@ -83,15 +87,14 @@ handle_call(
   _From,
   #state{min_size = MinSz,
          max_size = MaxSz,
+         busy = B,
          tab = T,
          requests = R,
          conns = C} = State) ->
-    {B, M} =
-        lists:foldl(
-          fun({_, {_, busy_connection}}, {B0, M0})      -> {B0 + 1, M0};
-             ({_, {Pid, _}}, {B0, M0}) when is_pid(Pid) -> {B0, M0 + 1};
-             (_, Acc)                                   -> Acc
-          end, {0, 0}, gb_trees:to_list(T)),
+    M = length(
+          lists:filter(
+            fun({_, {Pid, _}}) when is_pid(Pid) -> true; (_) -> false end,
+            gb_trees:to_list(T))),
     {reply,
      {ok, [{min_size, MinSz},
            {max_size, MaxSz},
@@ -125,14 +128,14 @@ handle_info(Msg, _) -> exit({unknown_info, Msg}).
 
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
-new_connection(#state{min_size = Sz, name = Name, conns = C0} = S) ->
-    case queue:len(C0) of
-        CSz when CSz < Sz -> epgsql_pool_conn_sup:start_connection(Name);
-        _                 -> ok
-    end,
-    S.
+ensure_min(#state{min_size = Sz, name = Name, conns = C, busy = B}) ->
+    Need = max(0, Sz - queue:len(C) - B),
+    ok = lists:foreach(
+           fun(_) ->
+                   epgsql_pool_conn_sup:start_connection(Name)
+           end, lists:seq(1, Need)).
 
-connection_returned(RPid, PPid, #state{tab = T0} = S) ->
+connection_returned(RPid, PPid, #state{tab = T0, busy = B0} = S) ->
     {CPid, T1} = tree_pop(PPid, T0),
     {{RRef, CPid}, T2} = tree_pop(RPid, T1),
     {{RPid, busy_request}, T3} = tree_pop(RRef, T2),
@@ -141,15 +144,14 @@ connection_returned(RPid, PPid, #state{tab = T0} = S) ->
     true = erlang:demonitor(CRef, [flush]),
     true = erlang:demonitor(RRef, [flush]),
     ok = epgsql_pool_conn:release(CPid),
-    S#state{tab = T5}.
+    S#state{tab = T5, busy = B0 - 1}.
 
 connection_available(CPid, #state{tab = T0, conns = C0} = S) ->
     CRef = erlang:monitor(process, CPid),
     C = queue:in(CPid, C0),
     T = gb_trees:insert(CPid, CRef, T0),
     T1 = gb_trees:insert(CRef, {CPid, available_connection}, T),
-    S1 = new_connection(S#state{tab = T1, conns = C}),
-    dequeue_request(S1).
+    dequeue_request(S#state{tab = T1, conns = C}).
 
 queue_request(RPid, RRef, RFrom, Timeout, #state{tab = T0, requests = R0} = S) ->
     Item = #req{from = RFrom, pid = RPid, ref = RRef, timestamp = erlang:now(), timeout = Timeout},
@@ -186,12 +188,12 @@ dequeue_request(#state{tab = T0, requests = R0, conns = C0} = S) ->
                             T7 = gb_trees:insert(RPid, {RRef, CPid}, T6),
                             T8 = gb_trees:insert(RRef, {RPid, busy_request}, T7),
                             gen_server:reply(RFrom, {ok, PPid}),
-                            dequeue_request(S1#state{tab = T8, conns = C})
+                            dequeue_request(S1#state{tab = T8, conns = C, busy = S1#state.busy + 1})
                     end
             end
     end.
 
-process_died(Pid, Ref, #state{tab = T0, conns = C0, requests = R0} = S) ->
+process_died(Pid, Ref, #state{tab = T0, conns = C0, requests = R0, busy = B0} = S) ->
     case tree_pop(Ref, T0) of
         {{CPid, busy_connection}, T1} ->
             CPid = Pid,
@@ -199,13 +201,13 @@ process_died(Pid, Ref, #state{tab = T0, conns = C0, requests = R0} = S) ->
             CRef = Ref,
             {{RRef, CPid}, T3} = tree_pop(RPid, T2),
             {{RPid, busy_request}, T4} = tree_pop(RRef, T3),
-            new_connection(S#state{tab = T4});
+            S#state{tab = T4, busy = B0 - 1};
         {{CPid, available_connection}, T1} ->
             CPid = Pid,
             {CRef, T2} = tree_pop(CPid, T1),
             CRef = Ref,
             C = q_delete(CPid, C0),
-            new_connection(S#state{tab = T2, conns = C});
+            S#state{tab = T2, conns = C};
         {{RPid, busy_request}, T1} ->
             RPid = Pid,
             {{RRef, CPid}, T2} = tree_pop(RPid, T1),
@@ -216,7 +218,7 @@ process_died(Pid, Ref, #state{tab = T0, conns = C0, requests = R0} = S) ->
             ok = epgsql_pool_conn:release(CPid),
             {CPid, T5} = tree_pop(PPid, T4),
             C = queue:in(CPid, C0),
-            S#state{tab = T5, conns = C};
+            S#state{tab = T5, conns = C, busy = B0 - 1};
         {{RPid, waiting_request}, T1} ->
             RPid = Pid,
             {RRef, T2} = tree_pop(RPid, T1),
