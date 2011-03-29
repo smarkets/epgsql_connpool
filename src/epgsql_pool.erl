@@ -192,8 +192,6 @@ dequeue_request(#state{tab = T0, requests = R0, conns = C0} = S) ->
     end.
 
 process_died(Pid, Ref, #state{tab = T0, conns = C0, requests = R0} = S) ->
-    io:format("DEAD REF: ~p (pid ~p)~n", [Ref, Pid]),
-    io:format("TREE: ~p~n", [gb_trees:to_list(T0)]),
     case tree_pop(Ref, T0) of
         {{CPid, busy_connection}, T1} ->
             CPid = Pid,
