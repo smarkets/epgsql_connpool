@@ -38,7 +38,7 @@ available(Name, Pid) ->
     gen_server:cast(name(Name), {available, Pid}).
 
 reserve(Name, Timeout) ->
-    gen_server:call(name(Name), {reserve, self(), Timeout}, Timeout).
+    gen_server:call(name(Name), {reserve, self(), Timeout}, infinity).
 
 release(Name, Pid) ->
     gen_server:cast(name(Name), {release, self(), Pid}).
@@ -46,24 +46,27 @@ release(Name, Pid) ->
 transaction(Name, F) -> transaction(Name, F, ?TIMEOUT).
 transaction(Name, F, Timeout) -> transaction(Name, F, [], Timeout).
 transaction(Name, F, Args, Timeout) ->
-    {ok, Pid} = reserve(Name, Timeout),
-    % If we exit here, the transaction never gets started
-    try begin
-            % Whereas an exit here will end up calling the 'after' block
-            {ok, [], []} = pgsql:squery(Pid, "BEGIN"),
-            R = apply(F, [Pid|Args]),
-            {ok, [], []} = pgsql:squery(Pid, "COMMIT"),
-            R
-        end
-    catch
-        throw:Throw ->
-            {ok, [], []} = pgsql:squery(Pid, "ROLLBACK"),
-            throw(Throw);
-        exit:Exit ->
-            {ok, [], []} = pgsql:squery(Pid, "ROLLBACK"),
-            exit(Exit)
-    after
-        ok = release(Name, Pid)
+    case reserve(Name, Timeout) of
+        {ok, Pid} when is_pid(Pid) ->
+            % If we exit here, the transaction never gets started
+            try begin
+                    % Whereas an exit here will end up calling the 'after' block
+                    {ok, [], []} = pgsql:squery(Pid, "BEGIN"),
+                    R = apply(F, [Pid|Args]),
+                    {ok, [], []} = pgsql:squery(Pid, "COMMIT"),
+                    {atomic, R}
+                end
+            catch
+                throw:Throw ->
+                    {ok, [], []} = pgsql:squery(Pid, "ROLLBACK"),
+                    throw(Throw);
+                exit:Exit ->
+                    {ok, [], []} = pgsql:squery(Pid, "ROLLBACK"),
+                    exit(Exit)
+            after
+                ok = release(Name, Pid)
+            end;
+        {error, reserve_timeout} -> {aborted, {error, reserve_timeout}}
     end.
 
 name(Name) when is_atom(Name) -> list_to_atom(atom_to_list(Name) ++ "_pool").
@@ -171,6 +174,7 @@ dequeue_request(#state{tab = T0, requests = R0, conns = C0} = S) ->
             case timer:now_diff(erlang:now(), Ts) > (Timeout * 1000) of
                 % Discard request which timed out
                 true ->
+                    gen_server:reply(RFrom, {error, reserve_timeout}),
                     true = erlang:demonitor(RRef, [flush]),
                     dequeue_request(S1);
                 % Otherwise, reply and track new busy pair
