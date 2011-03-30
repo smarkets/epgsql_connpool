@@ -30,7 +30,8 @@
           timeout
          }).
 
--define(TIMEOUT, timer:seconds(5)).
+-define(DEFAULT_RES_TIMEOUT, timer:seconds(5)).
+-define(DEFAULT_TXN_TIMEOUT, infinity).
 
 status(Name) -> gen_server:call(name(Name), stats, infinity).
 
@@ -43,30 +44,41 @@ reserve(Name, Timeout) ->
 release(Name, Pid) ->
     gen_server:cast(name(Name), {release, self(), Pid}).
 
-transaction(Name, F) -> transaction(Name, F, ?TIMEOUT).
-transaction(Name, F, Timeout) -> transaction(Name, F, [], Timeout).
-transaction(Name, F, Args, Timeout) ->
-    case reserve(Name, Timeout) of
-        {ok, Pid} when is_pid(Pid) ->
-            % If we exit here, the transaction never gets started
-            try begin
-                    % Whereas an exit here will end up calling the 'after' block
-                    {ok, [], []} = pgsql:squery(Pid, "BEGIN"),
-                    R = apply(F, [Pid|Args]),
-                    {ok, [], []} = pgsql:squery(Pid, "COMMIT"),
-                    {atomic, R}
-                end
-            catch
-                throw:Throw ->
-                    {ok, [], []} = pgsql:squery(Pid, "ROLLBACK"),
-                    throw(Throw);
-                exit:Exit ->
-                    {ok, [], []} = pgsql:squery(Pid, "ROLLBACK"),
-                    exit(Exit)
-            after
-                ok = release(Name, Pid)
-            end;
-        {error, reserve_timeout} -> {aborted, {error, reserve_timeout}}
+transaction(Name, F) -> transaction(Name, F, []).
+transaction(Name, F, Opts) -> transaction(Name, F, [], Opts).
+transaction(Name, F, Args, Opts) ->
+    RTimeout = proplists:get_value(reserve_timeout, Opts, ?DEFAULT_RES_TIMEOUT),
+    TTimeout = proplists:get_value(transaction_timeout, Opts, ?DEFAULT_TXN_TIMEOUT),
+    case reserve(Name, RTimeout) of
+        {ok, Pid} when is_pid(Pid) -> transaction(Name, Pid, F, Args, Opts, TTimeout);
+        {error, reserve_timeout}   -> {aborted, {error, reserve_timeout}}
+    end.
+
+transaction(Name, CPid, F, Args, _Opts, infinity) ->
+    {ok, Pid} = epgsql_pool_conn:connection(CPid),
+    try begin
+            {ok, [], []} = pgsql:squery(Pid, "BEGIN"),
+            R = apply(F, [Pid|Args]),
+            {ok, [], []} = pgsql:squery(Pid, "COMMIT"),
+            {atomic, R}
+        end
+    catch
+        throw:Throw ->
+            {ok, [], []} = pgsql:squery(Pid, "ROLLBACK"),
+            throw(Throw);
+        exit:Exit ->
+            {ok, [], []} = pgsql:squery(Pid, "ROLLBACK"),
+            exit(Exit)
+    after
+        ok = release(Name, CPid)
+    end;
+transaction(Name, CPid, F, Args, _Opts, TTimeout) ->
+    case epgsql_pool_conn:transaction(CPid, F, Args, TTimeout) of
+        {ok, R} ->
+            ok = release(Name, CPid),
+            {atomic, R};
+        {error, transaction_timeout} = E ->
+            {aborted, E}
     end.
 
 name(Name) when is_atom(Name) -> list_to_atom(atom_to_list(Name) ++ "_pool").
@@ -119,8 +131,8 @@ handle_call({reserve, Pid, Timeout}, From, #state{conns = C} = State0) ->
 
 handle_call(Msg, _, _) -> exit({unknown_call, Msg}).
 
-handle_cast({release, RPid, PPid}, State) ->
-    {noreply, connection_returned(RPid, PPid, State)};
+handle_cast({release, RPid, CPid}, State) ->
+    {noreply, connection_returned(RPid, CPid, State)};
 handle_cast({available, CPid}, State) ->
     {noreply, connection_available(CPid, State)};
 handle_cast(Msg, _) -> exit({unknown_cast, Msg}).
@@ -138,9 +150,8 @@ ensure_min(#state{min_size = Sz, name = Name, conns = C, busy = B}) ->
                    epgsql_pool_conn_sup:start_connection(Name)
            end, lists:seq(1, Need)).
 
-connection_returned(RPid, PPid, #state{tab = T0, busy = B0} = S) ->
-    {CPid, T1} = tree_pop(PPid, T0),
-    {{RRef, CPid}, T2} = tree_pop(RPid, T1),
+connection_returned(RPid, CPid, #state{tab = T0, busy = B0} = S) ->
+    {{RRef, CPid}, T2} = tree_pop(RPid, T0),
     {{RPid, busy_request}, T3} = tree_pop(RRef, T2),
     {{CRef, RPid}, T4} = tree_pop(CPid, T3),
     {{CPid, busy_connection}, T5} = tree_pop(CRef, T4),
@@ -185,14 +196,12 @@ dequeue_request(#state{tab = T0, requests = R0, conns = C0} = S) ->
                         {{value, CPid}, C} ->
                             {CRef, T2} = tree_pop(CPid, S1#state.tab),
                             {{CPid, available_connection}, T3} = tree_pop(CRef, T2),
-                            {ok, PPid} = epgsql_pool_conn:connection(CPid),
-                            T4 = gb_trees:insert(PPid, CPid, T3),
-                            T5 = gb_trees:insert(CRef, {CPid, busy_connection}, T4),
-                            T6 = gb_trees:insert(CPid, {CRef, RPid}, T5),
-                            T7 = gb_trees:insert(RPid, {RRef, CPid}, T6),
-                            T8 = gb_trees:insert(RRef, {RPid, busy_request}, T7),
-                            gen_server:reply(RFrom, {ok, PPid}),
-                            dequeue_request(S1#state{tab = T8, conns = C, busy = S1#state.busy + 1})
+                            T4 = gb_trees:insert(CRef, {CPid, busy_connection}, T3),
+                            T5 = gb_trees:insert(CPid, {CRef, RPid}, T4),
+                            T6 = gb_trees:insert(RPid, {RRef, CPid}, T5),
+                            T7 = gb_trees:insert(RRef, {RPid, busy_request}, T6),
+                            gen_server:reply(RFrom, {ok, CPid}),
+                            dequeue_request(S1#state{tab = T7, conns = C, busy = S1#state.busy + 1})
                     end
             end
     end.
@@ -205,6 +214,7 @@ process_died(Pid, Ref, #state{tab = T0, conns = C0, requests = R0, busy = B0} = 
             CRef = Ref,
             {{RRef, CPid}, T3} = tree_pop(RPid, T2),
             {{RPid, busy_request}, T4} = tree_pop(RRef, T3),
+            true = erlang:demonitor(RRef, [flush]),
             S#state{tab = T4, busy = B0 - 1};
         {{CPid, available_connection}, T1} ->
             CPid = Pid,
@@ -218,11 +228,10 @@ process_died(Pid, Ref, #state{tab = T0, conns = C0, requests = R0, busy = B0} = 
             RRef = Ref,
             {{CRef, RPid}, T3} = tree_pop(CPid, T2),
             {{CPid, busy_connection}, T4} = tree_pop(CRef, T3),
-            {ok, PPid} = epgsql_pool_conn:connection(CPid),
             ok = epgsql_pool_conn:release(CPid),
-            {CPid, T5} = tree_pop(PPid, T4),
             C = queue:in(CPid, C0),
-            S#state{tab = T5, conns = C, busy = B0 - 1};
+            true = erlang:demonitor(CRef, [flush]),
+            S#state{tab = T4, conns = C, busy = B0 - 1};
         {{RPid, waiting_request}, T1} ->
             RPid = Pid,
             {RRef, T2} = tree_pop(RPid, T1),
