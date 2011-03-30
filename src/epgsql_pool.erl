@@ -147,7 +147,9 @@ ensure_min(#state{min_size = Sz, name = Name, conns = C, busy = B}) ->
     Need = max(0, Sz - queue:len(C) - B),
     ok = lists:foreach(
            fun(_) ->
-                   epgsql_pool_conn_sup:start_connection(Name)
+                   {ok, Pid} = epgsql_pool_conn_sup:start_connection(Name),
+                   true = is_pid(Pid),
+                   ok
            end, lists:seq(1, Need)).
 
 connection_returned(RPid, CPid, #state{tab = T0, busy = B0} = S) ->

@@ -30,9 +30,13 @@ init(Name) ->
         {error, not_found} ->
             {stop, {error, missing_configuration}};
         {ok, L} ->
-            {ok, Pid} = apply(pgsql, connect, L),
-            ok = epgsql_pool:available(Name, self()),
-            {ok, #state{pool = Name, pid = Pid}}
+            case apply(pgsql, connect, L) of
+                {ok, Pid} ->
+                    ok = epgsql_pool:available(Name, self()),
+                    {ok, #state{pool = Name, pid = Pid}};
+                {error, Reason} ->
+                    {stop, Reason}
+            end
     end.
 
 terminate(shutdown, #state{pid = P}) -> pgsql:close(P).
