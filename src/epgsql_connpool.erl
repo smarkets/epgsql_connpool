@@ -1,6 +1,6 @@
 %% Copyright (c) 2011 Smarkets Limited
 %% Distributed under the MIT license; see LICENSE for details.
--module(epgsql_pool).
+-module(epgsql_connpool).
 
 -behaviour(gen_server).
 
@@ -55,7 +55,7 @@ transaction(Name, F, Args, Opts) ->
     end.
 
 transaction(Name, CPid, F, Args, _Opts, infinity) ->
-    {ok, Pid} = epgsql_pool_conn:connection(CPid),
+    {ok, Pid} = epgsql_connpool_conn:connection(CPid),
     try begin
             {ok, [], []} = pgsql:squery(Pid, "BEGIN"),
             R = apply(F, [Pid|Args]),
@@ -73,7 +73,7 @@ transaction(Name, CPid, F, Args, _Opts, infinity) ->
         ok = release(Name, CPid)
     end;
 transaction(Name, CPid, F, Args, _Opts, TTimeout) ->
-    case epgsql_pool_conn:transaction(CPid, F, Args, TTimeout) of
+    case epgsql_connpool_conn:transaction(CPid, F, Args, TTimeout) of
         {ok, R} ->
             ok = release(Name, CPid),
             {atomic, R};
@@ -87,7 +87,7 @@ start_link(Name) ->
     gen_server:start_link({local, name(Name)}, ?MODULE, Name, []).
 
 init(Name) ->
-    case epgsql_pool_config:pool_size(Name) of
+    case epgsql_connpool_config:pool_size(Name) of
         {ok, Size} ->
             S = #state{min_size = Size, name = Name},
             ok = ensure_min(S),
@@ -147,7 +147,7 @@ ensure_min(#state{min_size = Sz, name = Name, conns = C, busy = B}) ->
     Need = max(0, Sz - queue:len(C) - B),
     ok = lists:foreach(
            fun(_) ->
-                   {ok, Pid} = epgsql_pool_conn_sup:start_connection(Name),
+                   {ok, Pid} = epgsql_connpool_conn_sup:start_connection(Name),
                    true = is_pid(Pid),
                    ok
            end, lists:seq(1, Need)).
@@ -159,7 +159,7 @@ connection_returned(RPid, CPid, #state{tab = T0, busy = B0} = S) ->
     {{CPid, busy_connection}, T5} = tree_pop(CRef, T4),
     true = erlang:demonitor(CRef, [flush]),
     true = erlang:demonitor(RRef, [flush]),
-    ok = epgsql_pool_conn:release(CPid),
+    ok = epgsql_connpool_conn:release(CPid),
     S#state{tab = T5, busy = B0 - 1}.
 
 connection_available(CPid, #state{tab = T0, conns = C0} = S) ->
@@ -230,7 +230,7 @@ process_died(Pid, Ref, #state{tab = T0, conns = C0, requests = R0, busy = B0} = 
             RRef = Ref,
             {{CRef, RPid}, T3} = tree_pop(CPid, T2),
             {{CPid, busy_connection}, T4} = tree_pop(CRef, T3),
-            ok = epgsql_pool_conn:release(CPid),
+            ok = epgsql_connpool_conn:release(CPid),
             C = queue:in(CPid, C0),
             true = erlang:demonitor(CRef, [flush]),
             S#state{tab = T4, conns = C, busy = B0 - 1};

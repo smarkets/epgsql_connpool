@@ -1,6 +1,6 @@
 %% Copyright (c) 2011 Smarkets Limited
 %% Distributed under the MIT license; see LICENSE for details.
--module(epgsql_pool_app).
+-module(epgsql_connpool_app).
 
 -behaviour(supervisor).
 -behaviour(application).
@@ -16,10 +16,10 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    Names = [X || {X, _} <- epgsql_pool_config:pools()],
+    Names = [X || {X, _} <- epgsql_connpool_config:pools()],
     Children
-        = [{Name, {epgsql_pool_sup, start_link, [Name]}, permanent,
-            16#ffffffff, supervisor, [epgsql_pool_sup]} || Name <- Names],
+        = [{Name, {epgsql_connpool_sup, start_link, [Name]}, permanent,
+            16#ffffffff, supervisor, [epgsql_connpool_sup]} || Name <- Names],
     {ok, {{one_for_one, 10, 10}, Children}}.
 
 %% application

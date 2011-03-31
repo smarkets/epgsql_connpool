@@ -1,6 +1,6 @@
 %% Copyright (c) 2011 Smarkets Limited
 %% Distributed under the MIT license; see LICENSE for details.
--module(epgsql_pool_conn).
+-module(epgsql_connpool_conn).
 
 -behaviour(gen_server).
 
@@ -26,13 +26,13 @@ transaction(Name, F, Args, Timeout) ->
     end.
 
 init(Name) ->
-    case epgsql_pool_config:conn_by_name(Name) of
+    case epgsql_connpool_config:conn_by_name(Name) of
         {error, not_found} ->
             {stop, {error, missing_configuration}};
         {ok, L} ->
             case apply(pgsql, connect, L) of
                 {ok, Pid} ->
-                    ok = epgsql_pool:available(Name, self()),
+                    ok = epgsql_connpool:available(Name, self()),
                     {ok, #state{pool = Name, pid = Pid}};
                 {error, Reason} ->
                     {stop, Reason}
@@ -59,4 +59,4 @@ handle_cast(Msg, _) -> exit({unknown_cast, Msg}).
 handle_info(Msg, _) -> exit({unknown_info, Msg}).
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
-do_release(Name) -> epgsql_pool:available(Name, self()).
+do_release(Name) -> epgsql_connpool:available(Name, self()).

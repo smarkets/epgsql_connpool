@@ -1,13 +1,13 @@
 %% Copyright (c) 2011 Smarkets Limited
 %% Distributed under the MIT license; see LICENSE for details.
--module(epgsql_pool_config).
+-module(epgsql_connpool_config).
 
 -export([pools/0, pool_size/1, by_name/1, conn_by_name/1]).
 
 -define(DEFAULT_SZ, 10).
 
 pools() ->
-    case application:get_env(epgsql_pool, pools) of
+    case application:get_env(epgsql_connpool, pools) of
         undefined -> undefined;
         {ok, L}   -> L
     end.

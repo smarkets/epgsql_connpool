@@ -1,8 +1,8 @@
 %% -*- mode: erlang;tab-width: 4;erlang-indent-level: 4;indent-tabs-mode: nil -*-
 %% ex: ts=4 sw=4 et
-{application, epgsql_pool,
+{application, epgsql_connpool,
  [{description, "PostgreSQL Client Pool"},
   {vsn, "1.0.0"},
   {registered, []},
   {applications, [epgsql]},
-  {mod, {epgsql_pool_app, []}}]}.
+  {mod, {epgsql_connpool_app, []}}]}.

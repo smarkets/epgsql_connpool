@@ -1,6 +1,6 @@
 %% Copyright (c) 2011 Smarkets Limited
 %% Distributed under the MIT license; see LICENSE for details.
--module(epgsql_pool_conn_sup).
+-module(epgsql_connpool_conn_sup).
 
 -behaviour(supervisor).
 
@@ -18,5 +18,5 @@ start_connection(Name) -> supervisor:start_child(name(Name), []).
 init([Name]) ->
     {ok, {{simple_one_for_one, 10, 10},
           [{undefined,
-            {epgsql_pool_conn, start_link, [Name]},
-            transient, brutal_kill, worker, [epgsql_pool_conn]}]}}.
+            {epgsql_connpool_conn, start_link, [Name]},
+            transient, brutal_kill, worker, [epgsql_connpool_conn]}]}}.
