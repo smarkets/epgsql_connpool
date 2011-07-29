@@ -1,1 +1,36 @@
-Erlang PostgreSQL Database Client Pool
+Erlang PostgreSQL Database Client Pool for epgsql
+
+Configure application env like so:
+
+    application:start(epgsql),
+    application:set_env(epgsql_connpool, pools, 
+        [ {maindb, 
+                [
+                    {host,      "127.0.0.1"}, 
+                    {username,  "postgres"}, 
+                    {password,  ""}, 
+                    {size,      10}, 
+                    {opts, [
+                            {timeout,  5000}, 
+                            {database, "my_database"}
+                           ]}
+                ]
+          }
+        ]
+    ),
+    application:start(epgsql_connpool).
+
+And to make queries:
+    
+    {atomic, NumRows} = 
+    epgsql_connpool:transaction( fun(Db) ->
+        Sql = "SELECT count(*) FROM my_table WHERE id = $1;"
+        {ok, _, [{Ret}]} = pgsql:equery(Db, Sql, [123]),
+        Ret
+    end).
+
+With transaction(), all queries made within the fun are surrounded by a 
+BEGIN/COMMIT/ROLLBACK.
+
+With dirty(), the statements are run as-is, not in a transaction.
+
