@@ -7,6 +7,7 @@
 -export([name/1]).
 -export([available/2, status/1, reserve/2, release/2]).
 -export([transaction/2, transaction/3, transaction/4]).
+-export([dirty/2, dirty/3, dirty/4]).
 
 %% gen_server
 -export([start_link/1, init/1, code_change/3, terminate/2,
@@ -74,6 +75,40 @@ transaction(Name, CPid, F, Args, _Opts, infinity) ->
     end;
 transaction(Name, CPid, F, Args, _Opts, TTimeout) ->
     case epgsql_connpool_conn:transaction(CPid, F, Args, TTimeout) of
+        {ok, R} ->
+            ok = release(Name, CPid),
+            {atomic, R};
+        {error, transaction_timeout} = E ->
+            {aborted, E}
+    end.
+
+
+dirty(Name, F) -> dirty(Name, F, []).
+dirty(Name, F, Opts) -> dirty(Name, F, [], Opts).
+dirty(Name, F, Args, Opts) ->
+    RTimeout = proplists:get_value(reserve_timeout, Opts, ?DEFAULT_RES_TIMEOUT),
+    TTimeout = proplists:get_value(transaction_timeout, Opts, ?DEFAULT_TXN_TIMEOUT),
+    case reserve(Name, RTimeout) of
+        {ok, Pid} when is_pid(Pid) -> dirty(Name, Pid, F, Args, Opts, TTimeout);
+        {error, reserve_timeout}   -> {aborted, {error, reserve_timeout}}
+    end.
+
+dirty(Name, CPid, F, Args, _Opts, infinity) ->
+    {ok, Pid} = epgsql_connpool_conn:connection(CPid),
+    try begin
+            R = apply(F, [Pid|Args]),
+            {atomic, R}
+        end
+    catch
+        throw:Throw ->
+            throw(Throw);
+        exit:Exit ->
+            exit(Exit)
+    after
+        ok = release(Name, CPid)
+    end;
+dirty(Name, CPid, F, Args, _Opts, TTimeout) ->
+    case epgsql_connpool_conn:dirty(CPid, F, Args, TTimeout) of
         {ok, R} ->
             ok = release(Name, CPid),
             {atomic, R};

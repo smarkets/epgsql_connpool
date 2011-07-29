@@ -4,7 +4,7 @@
 
 -behaviour(gen_server).
 
--export([connection/1, release/1, close/1, transaction/4]).
+-export([connection/1, release/1, close/1, transaction/4, dirty/4]).
 -export([start_link/1, init/1, code_change/3, terminate/2,
          handle_call/3, handle_cast/2, handle_info/2]).
 
@@ -16,6 +16,16 @@ start_link(Name) -> gen_server:start_link(?MODULE, Name, []).
 close(Name) -> gen_server:call(Name, close, infinity).
 transaction(Name, F, Args, Timeout) ->
     try gen_server:call(Name, {transaction, F, Args}, Timeout)
+    catch
+        exit:{timeout, _} ->
+            exit(Name, timeout),
+            receive
+                {Mref, Reply} when is_reference(Mref) -> Reply
+            after 0 -> {error, transaction_timeout}
+            end
+    end.
+dirty(Name, F, Args, Timeout) ->
+    try gen_server:call(Name, {dirty, F, Args}, Timeout)
     catch
         exit:{timeout, _} ->
             exit(Name, timeout),
@@ -45,6 +55,10 @@ handle_call({transaction, F, Args0}, _From, #state{pid = P} = State) ->
     {ok, [], []} = pgsql:squery(P, "BEGIN"),
     R = apply(F, [P|Args0]),
     {ok, [], []} = pgsql:squery(P, "COMMIT"),
+    % XXX: What if exit signal is received here? Response may be lost.
+    {reply, {ok, R}, State};
+handle_call({dirty, F, Args0}, _From, #state{pid = P} = State) ->
+    R = apply(F, [P|Args0]),
     % XXX: What if exit signal is received here? Response may be lost.
     {reply, {ok, R}, State};
 handle_call(close, _From, State) ->
