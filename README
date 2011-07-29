@@ -23,7 +23,7 @@ Configure application env like so:
 And to make queries:
     
     {atomic, NumRows} = 
-    epgsql_connpool:transaction( fun(Db) ->
+    epgsql_connpool:transaction( maindb, fun(Db) ->
         Sql = "SELECT count(*) FROM my_table WHERE id = $1;"
         {ok, _, [{Ret}]} = pgsql:equery(Db, Sql, [123]),
         Ret
