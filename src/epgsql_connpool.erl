@@ -97,7 +97,7 @@ dirty(Name, CPid, F, Args, _Opts, infinity) ->
     {ok, Pid} = epgsql_connpool_conn:connection(CPid),
     try begin
             R = apply(F, [Pid|Args]),
-            {atomic, R}
+            {dirty, R}
         end
     catch
         throw:Throw ->
@@ -111,7 +111,7 @@ dirty(Name, CPid, F, Args, _Opts, TTimeout) ->
     case epgsql_connpool_conn:dirty(CPid, F, Args, TTimeout) of
         {ok, R} ->
             ok = release(Name, CPid),
-            {atomic, R};
+            {dirty, R};
         {error, transaction_timeout} = E ->
             {aborted, E}
     end.
