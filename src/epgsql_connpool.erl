@@ -159,13 +159,12 @@ handle_call(
            {monitored, M}]},
      State};
 
-handle_call({reserve, Pid, Timeout}, From, #state{conns = C, max_size = MaxSize, incr_size=IncrSize, name = Name} = State0) ->
+handle_call({reserve, Pid, Timeout}, From, #state{conns = C, busy = B, max_size = MaxSize, incr_size=IncrSize, name = Name} = State0) ->
     Ref = erlang:monitor(process, Pid),
     State = queue_request(Pid, Ref, From, Timeout, State0),
-    NumConns = queue:len(C),
     case queue:is_empty(C) of
         % No connections available
-        true when NumConns >= MaxSize -> {noreply, State};
+        true when B >= MaxSize -> {noreply, State};
         % Grow pool by increment size
         true -> ok = lists:foreach(
                            fun(_) ->
@@ -212,8 +211,8 @@ connection_returned(RPid, CPid, #state{tab = T0, busy = B0, conns = C0, min_size
     true = erlang:demonitor(CRef, [flush]),
     true = erlang:demonitor(RRef, [flush]),
     case queue:len(C0) of 
-      %% close connection if not all busy and minimum amount of connections ensured
-      NumConns when NumConns == B0, NumConns > MinSize -> 
+      %% close connection if more than minimum amount of connections available
+      NumConns when NumConns > MinSize -> 
            gen_server:cast(name(Name), {free, CPid}, infinity),
            S#state{tab = T5, busy = B0 - 1, conns = q_delete(CPid, C0)};
       _ -> ok = epgsql_connpool_conn:release(CPid), 
