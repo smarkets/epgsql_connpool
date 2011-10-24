@@ -16,11 +16,12 @@
 -record(state, {
           name,
           min_size,
-          max_size = 0,
-          busy     = 0, % count of busy connections
-          requests = queue:new(),
-          conns    = queue:new(),
-          tab      = gb_trees:empty()
+          max_size  = 0,
+          incr_size = 0,
+          busy      = 0, % count of busy connections
+          requests  = queue:new(),
+          conns     = queue:new(),
+          tab       = gb_trees:empty()
          }).
 
 -record(req, {
@@ -44,6 +45,7 @@ reserve(Name, Timeout) ->
 
 release(Name, Pid) ->
     gen_server:cast(name(Name), {release, self(), Pid}).
+
 
 transaction(Name, F) -> transaction(Name, F, []).
 transaction(Name, F, Opts) -> transaction(Name, F, [], Opts).
@@ -122,12 +124,15 @@ start_link(Name) ->
     gen_server:start_link({local, name(Name)}, ?MODULE, Name, []).
 
 init(Name) ->
-    case epgsql_connpool_config:pool_size(Name) of
-        {ok, Size} ->
-            S = #state{min_size = Size, name = Name},
+    PoolSize = epgsql_connpool_config:pool_size(Name),
+    MinSize = epgsql_connpool_config:min_size(Name),
+    IncrSize = epgsql_connpool_config:incr_size(Name),
+    case {PoolSize, MinSize, IncrSize} of
+        {{ok, PS}, {ok, MS}, {ok, IS}} ->
+            S = #state{max_size = PS, min_size = MS, incr_size = IS, name = Name},
             ok = ensure_min(S),
             {ok, S};
-        {error, not_found} -> {stop, {error, missing_configuration}}
+        {_, _, _} -> {stop, {error, missing_configuration}}
     end.
 
 terminate(_Reason, #state{}) -> ok.
@@ -154,12 +159,21 @@ handle_call(
            {monitored, M}]},
      State};
 
-handle_call({reserve, Pid, Timeout}, From, #state{conns = C} = State0) ->
+handle_call({reserve, Pid, Timeout}, From, #state{conns = C, max_size = MaxSize, incr_size=IncrSize, name = Name} = State0) ->
     Ref = erlang:monitor(process, Pid),
     State = queue_request(Pid, Ref, From, Timeout, State0),
+    NumConns = queue:len(C),
     case queue:is_empty(C) of
         % No connections available
-        true  -> {noreply, State};
+        true when NumConns >= MaxSize -> {noreply, State};
+        % Grow pool by increment size
+        true -> ok = lists:foreach(
+                           fun(_) ->
+                             {ok, Pid} = epgsql_connpool_conn_sup:start_connection(Name),
+                             true = is_pid(Pid),
+                             ok
+                           end, lists:seq(1, min(IncrSize, MaxSize - queue:len(C)))),
+                {noreply, State};
         % Immediately hand off connection in reply
         false -> {noreply, dequeue_request(State)}
     end;
@@ -170,6 +184,9 @@ handle_cast({release, RPid, CPid}, State) ->
     {noreply, connection_returned(RPid, CPid, State)};
 handle_cast({available, CPid}, State) ->
     {noreply, connection_available(CPid, State)};
+handle_cast({free, CPid}, State) ->
+    ok = epgsql_connpool_conn:close(CPid),
+    {noreply, State};
 handle_cast(Msg, _) -> exit({unknown_cast, Msg}).
 
 handle_info({'DOWN', Ref, process, Pid, _Reason}, State) ->
@@ -187,15 +204,21 @@ ensure_min(#state{min_size = Sz, name = Name, conns = C, busy = B}) ->
                    ok
            end, lists:seq(1, Need)).
 
-connection_returned(RPid, CPid, #state{tab = T0, busy = B0} = S) ->
+connection_returned(RPid, CPid, #state{tab = T0, busy = B0, conns = C0, min_size = MinSize, name = Name} = S) ->
     {{RRef, CPid}, T2} = tree_pop(RPid, T0),
     {{RPid, busy_request}, T3} = tree_pop(RRef, T2),
     {{CRef, RPid}, T4} = tree_pop(CPid, T3),
     {{CPid, busy_connection}, T5} = tree_pop(CRef, T4),
     true = erlang:demonitor(CRef, [flush]),
     true = erlang:demonitor(RRef, [flush]),
-    ok = epgsql_connpool_conn:release(CPid),
-    S#state{tab = T5, busy = B0 - 1}.
+    case queue:len(C0) of 
+      %% close connection if not all busy and minimum amount of connections ensured
+      NumConns when NumConns == B0, NumConns > MinSize -> 
+           gen_server:cast(name(Name), {free, CPid}, infinity),
+           S#state{tab = T5, busy = B0 - 1, conns = q_delete(CPid, C0)};
+      _ -> ok = epgsql_connpool_conn:release(CPid), 
+           S#state{tab = T5, busy = B0 - 1}
+    end.
 
 connection_available(CPid, #state{tab = T0, conns = C0} = S) ->
     CRef = erlang:monitor(process, CPid),
