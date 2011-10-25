@@ -166,16 +166,8 @@ handle_call({reserve, Pid, Timeout}, From, #state{conns = C, busy = B, max_size 
         % No connections available
         true when B >= MaxSize -> {noreply, State};
         % Grow pool by increment size
-        true -> lists:foreach(
-                               fun(_) ->
-                                   case epgsql_connpool_conn_sup:start_connection(Name) of
-                                     {ok, NewConnPid} when is_pid(NewConnPid) -> ok;
-                                     _Err -> throw(_Err) 
-                                   end,
-                                   %% {ok, Pid} = epgsql_connpool_conn_sup:start_connection(Name),
-                                   %% true = is_pid(Pid),
-                                   ok
-                               end, lists:seq(1, min(IncrSize, MaxSize - B)))
+        true -> lists:foreach(fun(_) -> start_connection(Name) end, 
+                              lists:seq(1, min(IncrSize, MaxSize - B)))
                       ,
                 {noreply, State};
         % Immediately hand off connection in reply
@@ -201,12 +193,7 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 ensure_min(#state{min_size = Sz, name = Name, conns = C, busy = B}) ->
     Need = max(0, Sz - queue:len(C) - B),
-    ok = lists:foreach(
-           fun(_) ->
-                   {ok, Pid} = epgsql_connpool_conn_sup:start_connection(Name),
-                   true = is_pid(Pid),
-                   ok
-           end, lists:seq(1, Need)).
+    ok = lists:foreach(fun(_) -> start_connection(Name) end, lists:seq(1, Need)).
 
 connection_returned(RPid, CPid, #state{tab = T0, busy = B0, conns = C0, min_size = MinSize, name = Name} = S) ->
     {{RRef, CPid}, T2} = tree_pop(RPid, T0),
@@ -303,6 +290,13 @@ process_died(Pid, Ref, #state{tab = T0, conns = C0, requests = R0, busy = B0} = 
             R = q_delete(RRef, #req.ref, R0),
             S#state{tab = T2, requests = R}
     end.
+
+start_connection(Name) ->
+  spawn(fun() -> 
+          {ok, Pid} = epgsql_connpool_conn_sup:start_connection(Name),
+          true = is_pid(Pid),
+          ok
+    end).
 
 tree_pop(K, T) -> {gb_trees:get(K, T), gb_trees:delete(K, T)}.
 
