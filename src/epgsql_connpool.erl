@@ -166,12 +166,17 @@ handle_call({reserve, Pid, Timeout}, From, #state{conns = C, busy = B, max_size 
         % No connections available
         true when B >= MaxSize -> {noreply, State};
         % Grow pool by increment size
-        true -> ok = lists:foreach(
-                           fun(_) ->
-                             {ok, Pid} = epgsql_connpool_conn_sup:start_connection(Name),
-                             true = is_pid(Pid),
-                             ok
-                           end, lists:seq(1, min(IncrSize, MaxSize - queue:len(C)))),
+        true -> lists:foreach(
+                               fun(_) ->
+                                   case epgsql_connpool_conn_sup:start_connection(Name) of
+                                     {ok, Pid} when is_pid(Pid) -> ok;
+                                     Err -> throw(Err)
+                                   end,
+                                   %% {ok, Pid} = epgsql_connpool_conn_sup:start_connection(Name),
+                                   %% true = is_pid(Pid),
+                                   ok
+                               end, lists:seq(1, min(IncrSize, MaxSize - B)))
+                      ,
                 {noreply, State};
         % Immediately hand off connection in reply
         false -> {noreply, dequeue_request(State)}
