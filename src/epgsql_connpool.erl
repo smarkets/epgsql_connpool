@@ -218,7 +218,7 @@ connection_returned(RPid, CPid, #state{tab = T0, busy = B0, conns = C0, min_size
     case queue:len(C0) of 
       %% close connection if more than minimum amount of connections available
       NumConns when NumConns > MinSize -> 
-           gen_server:cast(name(Name), {free, CPid}, infinity),
+           gen_server:cast(name(Name), {free, CPid}),
            S#state{tab = T5, busy = B0 - 1, conns = q_delete(CPid, C0)};
       _ -> ok = epgsql_connpool_conn:release(CPid), 
            S#state{tab = T5, busy = B0 - 1}
