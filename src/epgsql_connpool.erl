@@ -169,7 +169,7 @@ handle_call({reserve, Pid, Timeout}, From, #state{conns = C, busy = B, max_size 
         true -> lists:foreach(
                                fun(_) ->
                                    case epgsql_connpool_conn_sup:start_connection(Name) of
-                                     {ok, Pid} when is_pid(Pid) -> ok;
+                                     {ok, NewConnPid} when is_pid(NewConnPid) -> ok;
                                      _Err -> throw(_Err) 
                                    end,
                                    %% {ok, Pid} = epgsql_connpool_conn_sup:start_connection(Name),
