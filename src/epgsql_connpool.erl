@@ -170,7 +170,7 @@ handle_call({reserve, Pid, Timeout}, From, #state{conns = C, busy = B, max_size 
                                fun(_) ->
                                    case epgsql_connpool_conn_sup:start_connection(Name) of
                                      {ok, Pid} when is_pid(Pid) -> ok;
-                                     Err -> throw(Err)
+                                     _Err -> throw(_Err) 
                                    end,
                                    %% {ok, Pid} = epgsql_connpool_conn_sup:start_connection(Name),
                                    %% true = is_pid(Pid),
