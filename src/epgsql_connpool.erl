@@ -176,6 +176,7 @@ handle_call({reserve, Pid, Timeout}, From, #state{conns = C, busy = B, max_size 
 handle_call(Msg, _, _) -> exit({unknown_call, Msg}).
 
 handle_cast(start_connection, State=#state{name=Name}) ->
+    % don't care if start connection succeeds, will request more if needed
     epgsql_connpool_conn_sup:start_connection(Name),
     {noreply, State};
 handle_cast({release, RPid, CPid}, State) ->
