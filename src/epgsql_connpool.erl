@@ -206,8 +206,8 @@ connection_returned(RPid, CPid, #state{tab = T0, busy = B0, requests = R0, conns
     true = erlang:demonitor(RRef, [flush]),
     case {queue:len(R0), queue:len(C0)} of 
       %% close connection if more than minimum amount of connections available
-      %% and no requests pending
-      {0, NumConns} when NumConns > MinSize -> 
+      %% and no pending requests 
+      {0, NumConns} when NumConns >= MinSize -> 
            gen_server:cast(name(Name), {free, CPid}),
            S#state{tab = T5, busy = B0 - 1, conns = q_delete(CPid, C0)};
       {_,_} -> ok = epgsql_connpool_conn:release(CPid), 
