@@ -176,7 +176,7 @@ handle_call({reserve, Pid, Timeout}, From, #state{conns = C, busy = B, max_size 
 handle_call(Msg, _, _) -> exit({unknown_call, Msg}).
 
 handle_cast(start_connection, State=#state{name=Name}) ->
-    start_connection(Name), 
+    epgsql_connpool_conn_sup:start_connection(Name),
     {noreply, State};
 handle_cast({release, RPid, CPid}, State) ->
     {noreply, connection_returned(RPid, CPid, State)};
@@ -293,13 +293,6 @@ process_died(Pid, Ref, #state{tab = T0, conns = C0, requests = R0, busy = B0} = 
             R = q_delete(RRef, #req.ref, R0),
             S#state{tab = T2, requests = R}
     end.
-
-start_connection(Name) ->
-    % FIXME : handle error properly
-    epgsql_connpool_conn_sup:start_connection(Name),
-    %% {ok, Pid} = epgsql_connpool_conn_sup:start_connection(Name),
-    %% true = is_pid(Pid),
-    ok.
 
 tree_pop(K, T) -> {gb_trees:get(K, T), gb_trees:delete(K, T)}.
 
