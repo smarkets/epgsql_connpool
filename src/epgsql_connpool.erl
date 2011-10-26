@@ -294,8 +294,10 @@ process_died(Pid, Ref, #state{tab = T0, conns = C0, requests = R0, busy = B0} = 
     end.
 
 start_connection(Name) ->
-    {ok, Pid} = epgsql_connpool_conn_sup:start_connection(Name),
-    true = is_pid(Pid),
+    % FIXME : handle error properly
+    epgsql_connpool_conn_sup:start_connection(Name),
+    %% {ok, Pid} = epgsql_connpool_conn_sup:start_connection(Name),
+    %% true = is_pid(Pid),
     ok.
 
 tree_pop(K, T) -> {gb_trees:get(K, T), gb_trees:delete(K, T)}.
