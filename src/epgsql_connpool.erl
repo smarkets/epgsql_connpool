@@ -197,19 +197,20 @@ ensure_min(#state{min_size = Sz, name = Name, conns = C, busy = B}) ->
     Need = max(0, Sz - queue:len(C) - B),
     ok = lists:foreach(fun(_) -> gen_server:cast(name(Name), start_connection) end, lists:seq(1, Need)).
 
-connection_returned(RPid, CPid, #state{tab = T0, busy = B0, conns = C0, min_size = MinSize, name = Name} = S) ->
+connection_returned(RPid, CPid, #state{tab = T0, busy = B0, requests = R0, conns = C0, min_size = MinSize, name = Name} = S) ->
     {{RRef, CPid}, T2} = tree_pop(RPid, T0),
     {{RPid, busy_request}, T3} = tree_pop(RRef, T2),
     {{CRef, RPid}, T4} = tree_pop(CPid, T3),
     {{CPid, busy_connection}, T5} = tree_pop(CRef, T4),
     true = erlang:demonitor(CRef, [flush]),
     true = erlang:demonitor(RRef, [flush]),
-    case queue:len(C0) of 
+    case {queue:len(R0), queue:len(C0)} of 
       %% close connection if more than minimum amount of connections available
-      NumConns when NumConns > MinSize -> 
+      %% and no requests pending
+      {0, NumConns} when NumConns > MinSize -> 
            gen_server:cast(name(Name), {free, CPid}),
            S#state{tab = T5, busy = B0 - 1, conns = q_delete(CPid, C0)};
-      _ -> ok = epgsql_connpool_conn:release(CPid), 
+      {_,_} -> ok = epgsql_connpool_conn:release(CPid), 
            S#state{tab = T5, busy = B0 - 1}
     end.
 
