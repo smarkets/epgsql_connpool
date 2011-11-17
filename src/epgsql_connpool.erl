@@ -41,7 +41,7 @@ available(Name, Pid) ->
     gen_server:cast(name(Name), {available, Pid}).
 
 reserve(Name, Timeout) ->
-    gen_server:call(name(Name), {reserve, self(), Timeout}, infinity).
+    gen_server:call(name(Name), {reserve, self(), Timeout}, Timeout).
 
 release(Name, Pid) ->
     gen_server:cast(name(Name), {release, self(), Pid}).
