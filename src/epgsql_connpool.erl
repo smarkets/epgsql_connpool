@@ -35,7 +35,7 @@
 -define(DEFAULT_RES_TIMEOUT, timer:seconds(5)).
 -define(DEFAULT_TXN_TIMEOUT, infinity).
 
-status(Name) -> gen_server:call(name(Name), stats, infinity).
+status(Name) -> gen_server:call(name(Name), stats, 5000).
 
 available(Name, Pid) ->
     gen_server:cast(name(Name), {available, Pid}).
