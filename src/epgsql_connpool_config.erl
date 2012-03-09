@@ -6,9 +6,10 @@
 
 -define(DEFAULT_SZ, 10).
 
+-spec pools() -> [atom()].
 pools() ->
     case application:get_env(epgsql_connpool, pools) of
-        undefined -> undefined;
+        undefined -> [];
         {ok, L}   -> L
     end.
 
