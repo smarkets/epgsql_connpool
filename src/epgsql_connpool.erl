@@ -64,6 +64,9 @@ transaction(Name, CPid, F, Args, _Opts, infinity) ->
             {atomic, R}
         end
     catch
+        throw:{error, closed} ->
+            epgsql_connpool_conn:close(CPid),
+            throw({error, closed});
         throw:Throw ->
             {ok, [], []} = pgsql:squery(Pid, "ROLLBACK"),
             throw(Throw);
