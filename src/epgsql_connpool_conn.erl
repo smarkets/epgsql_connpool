@@ -52,14 +52,21 @@ init(Name) ->
 terminate(shutdown, #state{pid = P}) -> pgsql:close(P).
 
 handle_call({transaction, F, Args0}, _From, #state{pid = P} = State) ->
-    {ok, [], []} = pgsql:squery(P, "BEGIN"),
-    R = apply(F, [P|Args0]),
-    {ok, [], []} = pgsql:squery(P, "COMMIT"),
-    % XXX: What if exit signal is received here? Response may be lost.
-    {reply, {ok, R}, State};
+    try {ok, [], []} = pgsql:squery(P, "BEGIN"),
+         R = apply(F, [P|Args0]),
+         {ok, [], []} = pgsql:squery(P, "COMMIT"),
+         %% XXX: What if exit signal is received here? Response may be lost.
+         {reply, {ok, R}, State}
+    catch
+        throw:{error, closed} ->
+            {stop, closed, {error, closed}, State};
+        Type:Reason ->
+            pgsql:squery(P, "ROLLBACK"),
+            {reply, {error, {rollback, Type, Reason}}, State}
+    end;
 handle_call({dirty, F, Args0}, _From, #state{pid = P} = State) ->
     R = apply(F, [P|Args0]),
-    % XXX: What if exit signal is received here? Response may be lost.
+    %% XXX: What if exit signal is received here? Response may be lost.
     {reply, {ok, R}, State};
 handle_call(close, _From, State) ->
     {stop, shutdown, State};
