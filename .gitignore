@@ -2,3 +2,4 @@
 *.app
 .eunit/*
 deps/*
+.combo_dialyzer_plt
