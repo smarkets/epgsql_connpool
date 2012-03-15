@@ -16,7 +16,7 @@ start_link(Name) -> supervisor:start_link({local, name(Name)}, ?MODULE, [Name]).
 start_connection(Name) -> supervisor:start_child(name(Name), []).
 
 init([Name]) ->
-    {ok, {{simple_one_for_one, 10, 10},
+    {ok, {{simple_one_for_one, 0, 1},
           [{undefined,
             {epgsql_connpool_conn, start_link, [Name]},
-            transient, brutal_kill, worker, [epgsql_connpool_conn]}]}}.
+            temporary, brutal_kill, worker, [epgsql_connpool_conn]}]}}.
