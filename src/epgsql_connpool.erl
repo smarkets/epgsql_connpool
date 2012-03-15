@@ -20,7 +20,8 @@
           busy     = 0, % count of busy connections
           requests = queue:new(),
           conns    = queue:new(),
-          tab      = gb_trees:empty()
+          tab      = gb_trees:empty(),
+          check_tr
          }).
 
 -record(req, {
@@ -33,6 +34,7 @@
 
 -define(DEFAULT_RES_TIMEOUT, timer:seconds(5)).
 -define(DEFAULT_TXN_TIMEOUT, infinity).
+-define(CHECK_INTERVAL, timer:seconds(5)).
 
 status(Name) -> gen_server:call(name(Name), stats, infinity).
 
@@ -128,8 +130,9 @@ init(Name) ->
     case epgsql_connpool_config:pool_size(Name) of
         {ok, Size} ->
             S = #state{min_size = Size, name = Name},
-            ok = ensure_min(S),
-            {ok, S};
+            ok = ensure_min(S, true),
+            {ok, TRef} = timer:send_interval(?CHECK_INTERVAL, check_pool),
+            {ok, S#state{check_tr=TRef}};
         {error, not_found} -> {stop, {error, missing_configuration}}
     end.
 
@@ -175,19 +178,27 @@ handle_cast({available, CPid}, State) ->
     {noreply, connection_available(CPid, State)};
 handle_cast(Msg, _) -> exit({unknown_cast, Msg}).
 
+handle_info(check_pool, State) ->
+    ok = ensure_min(State, false),
+    {noreply, State};
 handle_info({'DOWN', Ref, process, Pid, _Reason}, State) ->
     {noreply, process_died(Pid, Ref, State)};
 handle_info(Msg, _) -> exit({unknown_info, Msg}).
 
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
-ensure_min(#state{min_size = Sz, name = Name, conns = C, busy = B}) ->
+ensure_min(#state{min_size = Sz, name = Name, conns = C, busy = B}, First) ->
     Need = max(0, Sz - queue:len(C) - B),
     ok = lists:foreach(
            fun(_) ->
-                   {ok, Pid} = epgsql_connpool_conn_sup:start_connection(Name),
-                   true = is_pid(Pid),
-                   ok
+                   if First ->
+                           {ok, Pid} = epgsql_connpool_conn_sup:start_connection(Name),
+                           true = is_pid(Pid),
+                           ok;
+                      true ->
+                           epgsql_connpool_conn_sup:start_connection(Name),
+                           ok
+                   end
            end, lists:seq(1, Need)).
 
 connection_returned(RPid, CPid, #state{tab = T0, busy = B0} = S) ->
