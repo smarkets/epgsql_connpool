@@ -61,7 +61,7 @@ handle_call({transaction, F, Args0}, _From, #state{pid = P} = State) ->
         throw:{error, closed} ->
             {stop, closed, {error, closed}, State};
         Type:Reason ->
-            pgsql:squery(P, "ROLLBACK"),
+            {ok, [], []} = pgsql:squery(P, "ROLLBACK"),
             {reply, {error, {rollback, Type, Reason}}, State}
     end;
 handle_call({dirty, F, Args0}, _From, #state{pid = P} = State) ->
