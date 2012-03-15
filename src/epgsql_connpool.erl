@@ -56,22 +56,19 @@ transaction(Name, F, Args, Opts) ->
     end.
 
 transaction(Name, CPid, F, Args, _Opts, infinity) ->
-    {ok, Pid} = epgsql_connpool_conn:connection(CPid),
-    try begin
-            {ok, [], []} = pgsql:squery(Pid, "BEGIN"),
-            R = apply(F, [Pid|Args]),
-            {ok, [], []} = pgsql:squery(Pid, "COMMIT"),
-            {atomic, R}
-        end
+    {ok, Pid} = epgsql_connpool_conn:begin_transaction(CPid),
+    try R = apply(F, [Pid|Args]),
+          ok = epgsql_connpool_conn:commit_transaction(CPid),
+          {atomic, R}
     catch
         throw:{error, closed} ->
             epgsql_connpool_conn:close(CPid),
             throw({error, closed});
         throw:Throw ->
-            {ok, [], []} = pgsql:squery(Pid, "ROLLBACK"),
+            ok = epgsql_connpool_conn:rollback_transaction(CPid),
             throw(Throw);
         exit:Exit ->
-            {ok, [], []} = pgsql:squery(Pid, "ROLLBACK"),
+            ok = epgsql_connpool_conn:rollback_transaction(CPid),
             exit(Exit)
     after
         ok = release(Name, CPid)
