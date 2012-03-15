@@ -6,25 +6,29 @@
 
 -define(DEFAULT_SZ, 10).
 
--spec pools() -> [atom()].
+-type pool_name() :: atom().
+-spec pools() -> [{pool_name(), list()}].
 pools() ->
     case application:get_env(epgsql_connpool, pools) of
         undefined -> [];
         {ok, L}   -> L
     end.
 
--spec pool_size(atom()) -> {error, not_found} | {ok, pos_integer()}.
+-spec pool_size(pool_name()) -> {error, not_found} | {ok, pos_integer()}.
 pool_size(Name) ->
     case by_name(Name) of
         {error, not_found} -> {error, not_found};
         {ok, Config} ->
             case lookup(size, Config) of
-                {error, not_found} -> {ok, ?DEFAULT_SZ};
-                {ok, V} -> {ok, V}
+                {ok, V} when is_integer(V), V > 0 -> {ok, V};
+                _ -> {ok, ?DEFAULT_SZ}
             end
     end.
 
+-spec by_name(pool_name()) -> {error, not_found} | {ok, list()}.
 by_name(Name) -> lookup(Name, pools()).
+
+-spec conn_by_name(pool_name()) -> {error, not_found} | {ok, list()}.
 conn_by_name(Name) ->
     case by_name(Name) of
         {error, not_found} ->
@@ -41,10 +45,20 @@ conn_by_name(Name) ->
             end
     end.
 
-% Simplification for proplists
-lookup(_, undefined) -> {error, not_found};
-lookup(K, L) ->
-    case lists:keysearch(K, 1, L) of
+-type config_val() :: [tuple()].
+-type lookup_result() :: {error, not_found} | {ok, term()}.
+-spec lookup(atom(), config_val()) -> lookup_result().
+lookup(K, L) when is_list(L) ->
+    case lks(K, L) of
         false           -> {error, not_found};
         {value, {K, V}} -> {ok, V}
     end.
+
+-spec lks(term(), [tuple()]) -> {value, tuple()} | false.
+%% lks(K, L) -> lists:keysearch(K, 1, L).
+lks(K, L) ->
+    case proplists:get_value(K, L) of
+        undefined -> false;
+        V -> {value, {K, V}}
+    end.
+
