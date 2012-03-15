@@ -1,6 +1,7 @@
 DEPS_DIR=deps
 DEPS=$(DEPS_DIR)/epgsql
 DEPS_EBIN=$(patsubst %,%/ebin,$(DEPS))
+ERL=erl
 
 .PHONY: compile
 compile: $(DEPS)
@@ -29,6 +30,15 @@ xref: compile
 .PHONY: docs
 docs:
 	@./rebar skip_deps=true doc
+
+.PHONY: dev
+dev: compile
+	@$(ERL) -name epgsql@127.0.0.1 -pa ebin $(DEPS_EBIN) \
+	    -eval 'application:start(crypto)' \
+	    -eval 'application:start(public_key)' \
+	    -eval 'application:start(ssl)' \
+	    -eval 'application:start(epgsql)' \
+	    -eval 'application:start(epgsql_connpool)'
 
 APPS=kernel stdlib sasl erts ssl tools os_mon runtime_tools crypto inets \
 	xmerl webtool snmp public_key mnesia eunit syntax_tools compiler
