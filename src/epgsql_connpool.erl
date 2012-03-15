@@ -69,7 +69,10 @@ transaction(Name, CPid, F, Args, _Opts, infinity) ->
             throw(Throw);
         exit:Exit ->
             ok = epgsql_connpool_conn:rollback_transaction(CPid),
-            exit(Exit)
+            exit(Exit);
+        error:Error ->
+            ok = epgsql_connpool_conn:rollback_transaction(CPid),
+            erlang:error(Error)
     after
         ok = release(Name, CPid)
     end;
