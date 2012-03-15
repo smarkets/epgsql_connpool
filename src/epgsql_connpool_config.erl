@@ -3,10 +3,18 @@
 -module(epgsql_connpool_config).
 
 -export([pools/0, pool_size/1, by_name/1, conn_by_name/1]).
+-export([add_pool/2]).
 
 -define(DEFAULT_SZ, 10).
 
 -type pool_name() :: atom().
+
+-spec add_pool(pool_name(), [tuple()]) -> ok.
+add_pool(Name, Config) ->
+    L0 = pools(),
+    L = [{Name, Config}|L0],
+    application:set_env(epgsql_connpool, pools, L).
+
 -spec pools() -> [{pool_name(), list()}].
 pools() ->
     case application:get_env(epgsql_connpool, pools) of
