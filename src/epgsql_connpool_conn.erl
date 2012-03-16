@@ -70,22 +70,31 @@ handle_call(rollback_transaction, _From, #state{pid = P} = State) ->
     ok = rollback_t(P),
     {reply, ok, State};
 handle_call({transaction, F, Args0}, _From, #state{pid = P} = State) ->
-    try ok = begin_t(P),
-         R = apply(F, [P|Args0]),
-         ok = commit_t(P),
-         %% XXX: What if exit signal is received here? Response may be lost.
-         {reply, {ok, R}, State}
+    ok = begin_t(P),
+    try
+        undefined = put(epgsql_conn, P),
+        R = apply(F, [P|Args0]),
+        ok = commit_t(P),
+        %% XXX: What if exit signal is received here? Response may be lost.
+        {reply, {ok, R}, State}
     catch
         throw:{error, closed} ->
             {stop, closed, {error, closed}, State};
         Type:Reason ->
             ok = rollback_t(P),
             {reply, {error, {rollback, Type, Reason}}, State}
+    after
+        P = erase(epgsql_conn)
     end;
 handle_call({dirty, F, Args0}, _From, #state{pid = P} = State) ->
-    R = apply(F, [P|Args0]),
-    %% XXX: What if exit signal is received here? Response may be lost.
-    {reply, {ok, R}, State};
+    undefined = put(epgsql_conn, P),
+    try
+        R = apply(F, [P|Args0]),
+        %% XXX: What if exit signal is received here? Response may be lost.
+        {reply, {ok, R}, State}
+    after
+        P = erase(epgsql_conn)
+    end;
 handle_call(close, _From, State) ->
     {stop, shutdown, State};
 handle_call(connection, _From, #state{pid = P} = State) ->

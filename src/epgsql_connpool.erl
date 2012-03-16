@@ -59,6 +59,7 @@ transaction(Name, F, Args, Opts) ->
 
 transaction(Name, CPid, F, Args, _Opts, infinity) ->
     {ok, Pid} = epgsql_connpool_conn:begin_transaction(CPid),
+    undefined = put(epgsql_conn, Pid),
     try R = apply(F, [Pid|Args]),
           ok = epgsql_connpool_conn:commit_transaction(CPid),
           {atomic, R}
@@ -76,6 +77,7 @@ transaction(Name, CPid, F, Args, _Opts, infinity) ->
             ok = epgsql_connpool_conn:rollback_transaction(CPid),
             erlang:error(Error)
     after
+        Pid = erase(epgsql_conn),
         ok = release(Name, CPid)
     end;
 transaction(Name, CPid, F, Args, _Opts, TTimeout) ->
@@ -100,6 +102,7 @@ dirty(Name, F, Args, Opts) ->
 
 dirty(Name, CPid, F, Args, _Opts, infinity) ->
     {ok, Pid} = epgsql_connpool_conn:connection(CPid),
+    undefined = put(epgsql_conn, Pid),
     try begin
             R = apply(F, [Pid|Args]),
             {dirty, R}
@@ -110,6 +113,7 @@ dirty(Name, CPid, F, Args, _Opts, infinity) ->
         exit:Exit ->
             exit(Exit)
     after
+        Pid = erase(epgsql_conn),
         ok = release(Name, CPid)
     end;
 dirty(Name, CPid, F, Args, _Opts, TTimeout) ->
