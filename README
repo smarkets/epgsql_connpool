@@ -23,14 +23,21 @@ Configure application env like so:
 And to make queries:
     
     {atomic, NumRows} = 
-    epgsql_connpool:transaction( maindb, fun(Db) ->
+    epgsql_connpool:transaction( maindb, fun(_Db) ->
         Sql = "SELECT count(*) FROM my_table WHERE id = $1;"
-        {ok, _, [{Ret}]} = pgsql:equery(Db, Sql, [123]),
+        {ok, _, [{Ret}]} = epgsql_query:equery(Sql, [123]),
         Ret
     end).
 
 With transaction(), all queries made within the fun are surrounded by a 
 BEGIN/COMMIT/ROLLBACK.
+
+The fun passed to epgsql_connpool:transaction/* will be handed a pid
+as its first argument. epgsql_connpool stores the connection pid in
+the process dictionary. By storing the pid, calls to the epgsql_query
+module (which is very similar in interface to the pgsql module) don't
+need to pass the pid directly. To support older applications, the pid
+can either be used to make calls to the pgsql module directly.
 
 With dirty(), the statements are run as-is, not in a transaction.
 
