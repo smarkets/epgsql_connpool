@@ -15,7 +15,7 @@
 -export([execute/1,
          execute/2,
          execute/3]).
--export([sync/0]).
+-export([close/1, sync/0]).
 -export([get_parameter/1]).
 
 squery(Sql) ->
@@ -56,6 +56,9 @@ describe(Statement) ->
 
 describe(Type, Name) ->
     pgsql:describe(cpid(), Type, Name).
+
+close(S) ->
+    pgsql:close(cpid(), S).
 
 sync() ->
     pgsql:sync(cpid()).
